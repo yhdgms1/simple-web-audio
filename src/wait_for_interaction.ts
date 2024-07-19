@@ -1,7 +1,7 @@
 const waitForInteraction = (() => {
   const { promise, resolve } = Promise.withResolvers<void>();
 	
-	const onUserInteraction = async () => {
+	const onUserInteraction = () => {
 		resolve();
 	};
 
