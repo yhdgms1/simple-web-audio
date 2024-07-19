@@ -1,14 +1,15 @@
 type PromiseOnceFunctionWrapper<T> = {
   (): Promise<T>;
 
+  fn: () => Promise<T>;
+
   value: null | T;
   promise: Promise<T>;
 };
 
 const promiseOnce = <T>(fn: () => Promise<T>) => {
   let called = false;
-
-  const { promise, resolve } = Promise.withResolvers<T>();
+  let { promise, resolve } = Promise.withResolvers<T>();
 
   const wrapper: PromiseOnceFunctionWrapper<T> = () => {
     if (called) {
@@ -23,6 +24,8 @@ const promiseOnce = <T>(fn: () => Promise<T>) => {
 
   wrapper.value = null;
   wrapper.promise = promise;
+
+  wrapper.fn = fn;
 
   promise.then((value) => {
     wrapper.value = value;

@@ -9,7 +9,7 @@
 ```ts
 import { createAudio } from 'simple-web-audio';
 
-const bgm = createAudio({
+const audio = createAudio({
   src: './path-to-music.ogg',
   loop: true
 });

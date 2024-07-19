@@ -13,13 +13,13 @@ type AudioOptions = {
 };
 
 const createAudio = (options: AudioOptions) => {
-  const getAudioContext = promiseOnce(async () => {
+  let getAudioContext = promiseOnce(async () => {
     await waitForInteraction();
 
     return new AudioContext();
   });
 
-  const getGainNode = promiseOnce(async () => {
+  let getGainNode = promiseOnce(async () => {
     const context = await getAudioContext();
 
     const gainNode = context.createGain();
@@ -29,7 +29,7 @@ const createAudio = (options: AudioOptions) => {
     return gainNode;
   });
 
-  const getBufferSource = promiseOnce(async () => {
+  let getBufferSource = promiseOnce(async () => {
     const context = await getAudioContext();
     const source = context.createBufferSource();
 
@@ -38,17 +38,21 @@ const createAudio = (options: AudioOptions) => {
     return source;
   });
 
-  const fetchArrayBuffer = promiseOnce(async () => {
+  let fetchArrayBuffer = promiseOnce(async () => {
     const response = await fetch(options.src);
 
     return await response.arrayBuffer();
   });
 
-  const load = promiseOnce(async () => {
+  let getAudioData = promiseOnce(async () => {
     const arrayBuffer = await fetchArrayBuffer();
     const context = await getAudioContext();
 
-    const audioData = await context.decodeAudioData(arrayBuffer);
+    return await context.decodeAudioData(arrayBuffer)
+  })
+
+  let load = promiseOnce(async () => {
+    const audioData = await getAudioData();
 
     const source = await getBufferSource();
     const gainNode = await getGainNode();
@@ -56,6 +60,41 @@ const createAudio = (options: AudioOptions) => {
     source.buffer = audioData;
     source.connect(gainNode);
   });
+
+  let reset = async () => {
+    /**
+     * Pause
+     */
+    await instance.pause();
+
+    /**
+     * Disconnect
+     */
+    await getBufferSource().then((source) => source.disconnect());
+
+    /**
+     * Reset `started` value
+     * That will make `source.start()` call when `play()` will be called
+     */
+    state.started = false;
+
+    /**
+     * Reset functions
+     */
+    getBufferSource = promiseOnce(getBufferSource.fn);
+    load = promiseOnce(load.fn);
+
+    /**
+     * Re-create buffer and connect it
+     */
+    await getBufferSource();
+    await load();
+
+    /**
+     * Play
+     */
+    await instance.play();
+  }
 
   const state = {
     started: false,
@@ -125,6 +164,9 @@ const createAudio = (options: AudioOptions) => {
       async load() {
         await load();
       },
+      async reset() {
+        await reset();
+      }
     },
     /**
      * Is currently playing
