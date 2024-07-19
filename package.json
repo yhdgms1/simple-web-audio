@@ -1,0 +1,31 @@
+{
+  "name": "simple-web-audio",
+  "version": "0.1.0",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup"
+  },
+  "files": [
+    "dist/*"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./*": "./dist/*",
+    "./package.json": "./package.json"
+  },
+  "keywords": [
+    "web audio"
+  ],
+  "author": "yhdgms1",
+  "license": "MIT",
+  "dependencies": {
+    "tsup": "^8.1.2",
+    "typescript": "^5.5.3"
+  }
+}

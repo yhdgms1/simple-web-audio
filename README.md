@@ -1,0 +1,92 @@
+# simple-web-audio
+
+Простая обёртка над Web Audio API. На Android не будет уведомления при проигрывании аудио.
+
+Некоторые браузеры показывают предупреждение лишь при создании AudioContext до взаимодействия пользователя. В этом пакете перед созданием аудио контекста происходит ожидания нажатия куда-либо на экран.
+
+## Использование
+
+```ts
+import { createAudio } from 'simple-web-audio';
+
+const bgm = createAudio({
+  src: './path-to-music.ogg',
+  loop: true
+});
+
+/**
+ * Когда загрузится AudioContext и GainNode установить громкость и получить громкость
+ */
+audio.on.setup().then(() => {
+  audio.volume = 0.25;
+
+  console.log(audio.volume)
+})
+
+/**
+ * Загрузка аудио начнётся после вызова `audio.play()`, тем не менее
+ * можно начать загрузку заранее через этот метод
+ */
+audio.actions.fetch()
+
+/**
+ * Включить
+ */
+audio.play().then(() => {
+  /**
+   * Играет или нет
+   */
+  console.log(audio.playing) // true
+})
+
+/**
+ * Выключить
+ */
+audio.pause().then(() => {
+  /**
+   * Играет или нет
+   */
+  console.log(audio.playing) // false
+})
+```
+
+### Выключить при закрытии страницы
+
+```ts
+// Можно брать из localStorage
+let state: "unmuted" | "muted" = "unmuted"
+
+button.addEventListener('click', () => {
+  if (audio.playing) {
+    audio.pause()
+    button.textContent = 'Play'
+    state = 'muted'
+  } else {
+    audio.play();
+    button.textContent = 'Pause'
+    state = 'unmuted'
+  }
+})
+
+let status: "idle" | "focused" | "blurred" = "idle";
+
+if (status === 'idle' && !audio.playing && state === 'unmuted') {
+  audio.play();
+}
+
+addEventListener('focus', () => {
+  if (status === 'blurred' && !audio.playing && state === 'unmuted') {
+    audio.play()
+  }
+
+  status = 'focused';
+});
+
+addEventListener('blur', () => {
+  if (audio.playing) {
+    audio.pause();
+  }
+
+  status = 'blurred';
+});
+```
