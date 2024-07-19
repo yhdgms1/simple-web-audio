@@ -62,10 +62,9 @@ const createAudio = (options: AudioOptions) => {
   });
 
   let reset = async () => {
-    /**
-     * Pause
-     */
-    await instance.pause();
+    if (state.playing) {
+      return;
+    }
 
     /**
      * Disconnect
@@ -89,11 +88,6 @@ const createAudio = (options: AudioOptions) => {
      */
     await getBufferSource();
     await load();
-
-    /**
-     * Play
-     */
-    await instance.play();
   }
 
   const state = {
