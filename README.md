@@ -1,8 +1,8 @@
 # simple-web-audio
 
-Простая обёртка над Web Audio API. Цель пакета — сделать так, чтобы на Android не было уведомления при проигрывании аудио.
+A simple wrapper over the Web Audio API
 
-## Использование
+## Usage
 
 ```ts
 import { createAudio } from 'simple-web-audio';
@@ -15,34 +15,42 @@ const audio = createAudio({
 });
 
 /**
- * Включить
+ * Play
  */
 audio.play().then(() => {
-  /**
-   * Играет или нет
-   */
   console.log(audio.playing) // true
 })
 
 /**
- * Выключить
+ * Pause
  */
 audio.pause().then(() => {
-  /**
-   * Играет или нет
-   */
   console.log(audio.playing) // false
 })
 
 /**
- * Предзагрузка
+ * Will stop audio, next play will be from the start
+ */
+audio.stop()
+
+/**
+ * Will stop audio, disable event listeners, it will be impossible to play audio again
+ */
+audio.destroy()
+
+/**
+ * Prefetch
  */
 audio.fetch().then(() => {
-  console.log('Аудио загружено')
+  console.log('audio is fetched')
 })
 ```
 
-## Пользовательские эффекты
+## User Effects
+
+You should provide a function that will get `AudioContext` and a `GainNode`. Function should return node that will be connected to audio source. Read more about applying effects here: https://web.dev/patterns/media/audio-effects
+
+In this example we are using library called Tuna to apply some effects. Pay close attention to what is returned
 
 ```ts
 import { createAudio } from 'simple-web-audio';
@@ -65,7 +73,7 @@ const audio = createAudio({
 });
 
 /**
- * Без эффектов
+ * Without Effects
  */
 const audio = createAudio({
   src: './path-to-music.weba',
@@ -75,9 +83,9 @@ const audio = createAudio({
 });
 ```
 
-## Изменение громкости
+## Volume Change
 
-Изменить громкость можно во время запуска функции createAudio, но также существует возможность изменять громкость во время исполнения.
+You can change the volume during the call of the `createAudio` function, but it is also possible to change the volume during execution.
 
 ```ts
 const audio = createAudio({
@@ -96,4 +104,4 @@ audio.play().then(() => {
 })
 ```
 
-Но менять громкость можно только после запуска воспроизведения аудио.
+But you can only change the volume after starting audio playback.
