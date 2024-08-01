@@ -26,7 +26,6 @@
   "author": "yhdgms1",
   "license": "MIT",
   "dependencies": {
-    "nanostores": "^0.10.3",
     "p-limit": "^6.1.0",
     "tsup": "^8.1.2",
     "typescript": "^5.5.3"

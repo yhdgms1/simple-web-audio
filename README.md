@@ -11,23 +11,9 @@ import { createAudio } from 'simple-web-audio';
 
 const audio = createAudio({
   src: './path-to-music.ogg',
-  loop: true
+  loop: true,
+  volume: 0.25
 });
-
-/**
- * Когда загрузится AudioContext и GainNode установить громкость и получить громкость
- */
-audio.on.setup().then(() => {
-  audio.volume = 0.25;
-
-  console.log(audio.volume)
-})
-
-/**
- * Загрузка аудио начнётся после вызова `audio.play()`, тем не менее
- * можно начать загрузку заранее через этот метод
- */
-audio.actions.fetch()
 
 /**
  * Включить

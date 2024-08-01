@@ -1,6 +1,6 @@
 import { waitForInteraction } from "./wait_for_interaction";
 import { registerEventListeners } from './browser-events';
-import pLimit from 'p-limit';
+import { createQueue } from './queue';
 
 type AudioOptions = {
   /**
@@ -9,12 +9,19 @@ type AudioOptions = {
   src: string;
   /**
    * Loop
+   * @default false
    */
-  loop: boolean;
+  loop?: boolean;
   /**
    * Volume
+   * @default 1
    */
-  volume: number;
+  volume?: number;
+  /**
+   * Will pause playing on blur event, play on focus.
+   * @default false
+   */
+  pauseOnBlur?: boolean;
 };
 
 const createAudio = (options: AudioOptions) => {
@@ -32,13 +39,13 @@ const createAudio = (options: AudioOptions) => {
 
   const createGainNode = () => {
     gainNode = audioContext.createGain();
-    gainNode.gain.value = options.volume;
+    gainNode.gain.value = options.volume || 1;
     gainNode.connect(audioContext.destination);
   }
 
   const createBufferSource = () => {
     bufferSource = audioContext.createBufferSource();
-    bufferSource.loop = options.loop;
+    bufferSource.loop = options.loop || false;
   }
 
   const fetchArrayBuffer = async () => {
@@ -56,7 +63,7 @@ const createAudio = (options: AudioOptions) => {
     }
   }
 
-  let queue = [
+  const queue = createQueue([
     waitForInteraction,
     createAudioContext,
     createGainNode,
@@ -64,32 +71,23 @@ const createAudio = (options: AudioOptions) => {
     fetchArrayBuffer,
     decodeAudioData,
     connectSources
-  ];
-
-  const limit = pLimit(1);
-
-  const run = async () => {
-    const items = queue.slice();
-
-    for await (const item of items) {
-      await item();
-    }
-
-    queue = queue.filter(item => !items.includes(item));
-  };
+  ])
 
   const unregister = registerEventListeners({
     focus: () => {
-      queue.push(playAudio);
-      limit(run)
+      // todo: check for paused state. i.e. do not play sound on focus when sound was paused manually
+      if (options.pauseOnBlur) {
+        queue.queue.push(playAudio);
+        queue.execute()
+      }
     },
     blur: () => {
-      queue.push(pauseAudio);
-      limit(run)
+      if (options.pauseOnBlur) {
+        queue.queue.push(pauseAudio);
+        queue.execute()
+      }
     }
   });
-
-  unregister;
 
   const state = {
     started: false,
@@ -114,8 +112,8 @@ const createAudio = (options: AudioOptions) => {
   }
 
   const pauseAudio = async () => {
-    if (audioContext.state === "suspended" && queue.at(-1) === playAudio) {
-      queue.pop();
+    if (audioContext.state === "suspended" && queue.queue.at(-1) === playAudio) {
+      queue.queue.pop();
     }
 
     if (audioContext.state === "running") {
@@ -135,33 +133,33 @@ const createAudio = (options: AudioOptions) => {
     state.started = false;
   }
 
-  const instance = {
-    async play() {
-      queue.push(playAudio);
-      run()
+  return {
+    play() {
+      queue.queue.push(playAudio);
+
+      return queue.execute();
     },
-    async pause() {
-      queue.push(pauseAudio);
-      run()
+    pause() {
+      queue.queue.push(pauseAudio);
+
+      return queue.execute();
     },
     async reset() {
-      const playing = state.playing;
-
-      if (playing) {
-        queue.push(pauseAudio)
+      if (state.playing) {
+        queue.queue.push(pauseAudio)
       }
 
-      queue.push(
+      queue.queue.push(
         disconnectAudio,
         createBufferSource,
         connectSources
       );
 
-      if (playing) {
-        queue.push(playAudio)
+      if (state.playing) {
+        queue.queue.push(playAudio)
       }
 
-      limit(run)
+      return queue.execute();
     },
     /**
      * Is currently playing
@@ -169,10 +167,28 @@ const createAudio = (options: AudioOptions) => {
     get playing() {
       return state.playing;
     },
-    run: () => limit(run),
-  };
+    async destroy() {
+      unregister();
 
-  return instance;
+      queue.queue.push(
+        pauseAudio,
+        disconnectAudio
+      );
+
+      await queue.execute();
+
+      // @ts-expect-error
+      audioContext = null;
+      // @ts-expect-error
+      gainNode = null;
+      // @ts-expect-error
+      bufferSource = null;
+      // @ts-expect-error
+      arrayBuffer = null;
+      // @ts-expect-error
+      audioBuffer = null;
+    }
+  }
 };
 
 export { createAudio };
