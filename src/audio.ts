@@ -1,6 +1,7 @@
 import { waitForInteraction } from "./wait_for_interaction";
 import { registerEventListeners } from './browser-events';
 import { createQueue } from './queue';
+import { cachedPromise } from './cached-promise';
 
 type AudioOptions = {
   /**
@@ -22,6 +23,10 @@ type AudioOptions = {
    * @default false
    */
   pauseOnBlur?: boolean;
+  /**
+   * @default false
+   */
+  autoplay?: boolean;
 };
 
 const createAudio = (options: AudioOptions) => {
@@ -48,9 +53,9 @@ const createAudio = (options: AudioOptions) => {
     bufferSource.loop = options.loop || false;
   }
 
-  const fetchArrayBuffer = async () => {
+  const fetchArrayBuffer = cachedPromise(async () => {
     arrayBuffer = await fetch(options.src).then(res => res.arrayBuffer());
-  }
+  })
 
   const decodeAudioData = async () => {
     audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
@@ -70,28 +75,37 @@ const createAudio = (options: AudioOptions) => {
     createBufferSource,
     fetchArrayBuffer,
     decodeAudioData,
-    connectSources
-  ])
+    connectSources,
+  ]);
+
+  /**
+   * Will resume when focus or not
+   */
+  let resume = false;
 
   const unregister = registerEventListeners({
     focus: () => {
-      // todo: check for paused state. i.e. do not play sound on focus when sound was paused manually
-      if (options.pauseOnBlur) {
-        queue.queue.push(playAudio);
-        queue.execute()
-      }
+      if (!options.pauseOnBlur || !resume) return;
+
+      resume = false;
+
+      queue.queue.push(playAudio);
+      queue.execute()
     },
     blur: () => {
-      if (options.pauseOnBlur) {
-        queue.queue.push(pauseAudio);
-        queue.execute()
-      }
+      if (!options.pauseOnBlur || !state.playing) return;
+
+      resume = true;
+
+      queue.queue.push(pauseAudio);
+      queue.execute()
     }
   });
 
   const state = {
     started: false,
     playing: false,
+    destroyed: false
   };
 
   const playAudio = async () => {
@@ -133,18 +147,38 @@ const createAudio = (options: AudioOptions) => {
     state.started = false;
   }
 
+  if (options.autoplay) {
+    queue.queue.push(playAudio)
+    queue.execute()
+  }
+
   return {
-    play() {
+    /**
+     * Play
+     */
+    async play() {
+      if (state.destroyed) return;
+      
       queue.queue.push(playAudio);
 
       return queue.execute();
     },
-    pause() {
+    /**
+     * Pause
+     */
+    async pause() {
+      if (state.destroyed) return;
+      
       queue.queue.push(pauseAudio);
 
       return queue.execute();
     },
+    /**
+     * Reset
+     */
     async reset() {
+      if (state.destroyed) return;
+
       if (state.playing) {
         queue.queue.push(pauseAudio)
       }
@@ -162,12 +196,11 @@ const createAudio = (options: AudioOptions) => {
       return queue.execute();
     },
     /**
-     * Is currently playing
+     * Destroy
      */
-    get playing() {
-      return state.playing;
-    },
     async destroy() {
+      if (state.destroyed) return;
+
       unregister();
 
       queue.queue.push(
@@ -176,6 +209,8 @@ const createAudio = (options: AudioOptions) => {
       );
 
       await queue.execute();
+
+      state.destroyed = true;
 
       // @ts-expect-error
       audioContext = null;
@@ -187,7 +222,18 @@ const createAudio = (options: AudioOptions) => {
       arrayBuffer = null;
       // @ts-expect-error
       audioBuffer = null;
-    }
+    },
+    async fetch() {
+      if (state.destroyed) return;
+
+      await fetchArrayBuffer();
+    },
+    /**
+     * Is currently playing
+     */
+    get playing() {
+      return state.playing;
+    },
   }
 };
 

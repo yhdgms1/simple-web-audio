@@ -5,10 +5,10 @@ const waitForInteraction = (() => {
 		resolve();
 	};
 
-	document.addEventListener('pointerdown', onUserInteraction, { once: true });
-	document.addEventListener('pointerup', onUserInteraction, { once: true });
+	document.addEventListener('touchstart', onUserInteraction, { once: true });
+	document.addEventListener('touchend', onUserInteraction, { once: true });
+	document.addEventListener('click', onUserInteraction, { once: true });
 	document.addEventListener('keydown', onUserInteraction, { once: true });
-	document.addEventListener('keyup', onUserInteraction, { once: true });
 
 	return () => {
     return promise;
