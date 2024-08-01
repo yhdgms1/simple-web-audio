@@ -2,6 +2,7 @@ import { waitForInteraction } from "./wait_for_interaction";
 import { registerEventListeners } from './browser-events';
 import { createQueue } from './queue';
 import { cachedPromise } from './cached-promise';
+import { noop } from "./noop";
 
 type AudioOptions = {
   /**
@@ -29,6 +30,8 @@ type AudioOptions = {
   autoplay?: boolean;
 };
 
+type OnEndedCallback = (this: AudioScheduledSourceNode, ev: Event) => any;
+
 const createAudio = (options: AudioOptions) => {
   let audioContext: AudioContext;
   let gainNode: GainNode;
@@ -36,10 +39,17 @@ const createAudio = (options: AudioOptions) => {
   let arrayBuffer: ArrayBuffer;
   let audioBuffer: AudioBuffer;
 
+  let onEnded: OnEndedCallback = noop;
+
+  const onBufferSourceEnded: OnEndedCallback = function(event) {
+    onEnded.call(this, event);
+
+    // todo: make sure this is not current buffer source
+    bufferSource.onended = null;
+  }
+
   const createAudioContext = () => {
-    audioContext = new AudioContext({
-      sampleRate: 44100
-    })
+    audioContext = new AudioContext()
   }
 
   const createGainNode = () => {
@@ -51,6 +61,8 @@ const createAudio = (options: AudioOptions) => {
   const createBufferSource = () => {
     bufferSource = audioContext.createBufferSource();
     bufferSource.loop = options.loop || false;
+
+    bufferSource.onended = onBufferSourceEnded;
   }
 
   const fetchArrayBuffer = cachedPromise(async () => {
@@ -240,6 +252,13 @@ const createAudio = (options: AudioOptions) => {
       if (state.destroyed) return;
 
       await fetchArrayBuffer();
+    },
+    /**
+     * Set's callback once, overriding previous one
+     * @param cb Callback function
+     */
+    onEnded(cb: OnEndedCallback) {
+      onEnded = cb;
     },
     /**
      * Is currently playing
