@@ -1,5 +1,7 @@
-import { promiseOnce } from "./promise_once";
 import { waitForInteraction } from "./wait_for_interaction";
+import { registerEventListeners } from './browser-events';
+import { createQueue } from './queue';
+import { cachedPromise } from './cached-promise';
 
 type AudioOptions = {
   /**
@@ -8,159 +10,223 @@ type AudioOptions = {
   src: string;
   /**
    * Loop
+   * @default false
    */
-  loop: boolean;
+  loop?: boolean;
+  /**
+   * Volume
+   * @default 1
+   */
+  volume?: number;
+  /**
+   * Will pause playing on blur event, play on focus.
+   * @default false
+   */
+  pauseOnBlur?: boolean;
+  /**
+   * @default false
+   */
+  autoplay?: boolean;
 };
 
 const createAudio = (options: AudioOptions) => {
-  let getAudioContext = promiseOnce(async () => {
-    await waitForInteraction();
+  let audioContext: AudioContext;
+  let gainNode: GainNode;
+  let bufferSource: AudioBufferSourceNode;
+  let arrayBuffer: ArrayBuffer;
+  let audioBuffer: AudioBuffer;
 
-    return new AudioContext();
-  });
+  const createAudioContext = () => {
+    audioContext = new AudioContext({
+      sampleRate: 44100
+    })
+  }
 
-  let getGainNode = promiseOnce(async () => {
-    const context = await getAudioContext();
+  const createGainNode = () => {
+    gainNode = audioContext.createGain();
+    gainNode.gain.value = options.volume || 1;
+    gainNode.connect(audioContext.destination);
+  }
 
-    const gainNode = context.createGain();
+  const createBufferSource = () => {
+    bufferSource = audioContext.createBufferSource();
+    bufferSource.loop = options.loop || false;
+  }
 
-    gainNode.connect(context.destination);
-
-    return gainNode;
-  });
-
-  let getBufferSource = promiseOnce(async () => {
-    const context = await getAudioContext();
-    const source = context.createBufferSource();
-
-    source.loop = options.loop;
-
-    return source;
-  });
-
-  let fetchArrayBuffer = promiseOnce(async () => {
-    const response = await fetch(options.src);
-
-    return await response.arrayBuffer();
-  });
-
-  let getAudioData = promiseOnce(async () => {
-    const arrayBuffer = await fetchArrayBuffer();
-    const context = await getAudioContext();
-
-    return await context.decodeAudioData(arrayBuffer)
+  const fetchArrayBuffer = cachedPromise(async () => {
+    arrayBuffer = await fetch(options.src).then(res => res.arrayBuffer());
   })
 
-  let load = promiseOnce(async () => {
-    const audioData = await getAudioData();
+  const decodeAudioData = async () => {
+    audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+  }
 
-    const source = await getBufferSource();
-    const gainNode = await getGainNode();
+  const connectSources = () => {
+    if (bufferSource.buffer === null) {
+      bufferSource.buffer = audioBuffer;
+      bufferSource.connect(gainNode);
+    }
+  }
 
-    source.buffer = audioData;
-    source.connect(gainNode);
+  const queue = createQueue([
+    waitForInteraction,
+    createAudioContext,
+    createGainNode,
+    createBufferSource,
+    fetchArrayBuffer,
+    decodeAudioData,
+    connectSources,
+  ]);
+
+  /**
+   * Will resume when focus or not
+   */
+  let resume = false;
+
+  const unregister = registerEventListeners({
+    focus: () => {
+      if (!options.pauseOnBlur || !resume) return;
+
+      resume = false;
+
+      queue.queue.push(playAudio);
+      queue.execute()
+    },
+    blur: () => {
+      if (!options.pauseOnBlur || !state.playing) return;
+
+      resume = true;
+
+      queue.queue.push(pauseAudio);
+      queue.execute()
+    }
   });
 
-  let reset = async () => {
-    if (state.playing) {
-      return;
+  const state = {
+    started: false,
+    playing: false,
+    destroyed: false
+  };
+
+  const playAudio = async () => {
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+
+      if (state.started) {
+        state.playing = true;
+      }
     }
 
-    /**
-     * Disconnect
-     */
-    await getBufferSource().then((source) => source.disconnect());
+    if (!state.started) {
+      bufferSource.start();
+
+      state.started = true;
+      state.playing = true;
+    }
+  }
+
+  const pauseAudio = async () => {
+    if (audioContext.state === "suspended" && queue.queue.at(-1) === playAudio) {
+      queue.queue.pop();
+    }
+
+    if (audioContext.state === "running") {
+      await audioContext.suspend();
+
+      state.playing = false;
+    }
+  }
+
+  const disconnectAudio = async () => {
+    bufferSource.disconnect();
 
     /**
      * Reset `started` value
      * That will make `source.start()` call when `play()` will be called
      */
     state.started = false;
-
-    /**
-     * Reset functions
-     */
-    getBufferSource = promiseOnce(getBufferSource.fn);
-    load = promiseOnce(load.fn);
-
-    /**
-     * Re-create buffer and connect it
-     */
-    await getBufferSource();
-    await load();
   }
 
-  const state = {
-    started: false,
-    playing: false,
-  };
+  if (options.autoplay) {
+    queue.queue.push(playAudio)
+    queue.execute()
+  }
 
-  const instance = {
+  return {
+    /**
+     * Play
+     */
     async play() {
-      const context = await getAudioContext();
-      const source = await getBufferSource();
+      if (state.destroyed) return;
+      
+      queue.queue.push(playAudio);
 
-      await load();
-
-      if (context.state === "suspended") {
-        await context.resume();
-
-        if (state.started) {
-          state.playing = true;
-        }
-      }
-
-      if (!state.started) {
-        source.start();
-
-        state.started = true;
-        state.playing = true;
-      }
+      return queue.execute();
     },
+    /**
+     * Pause
+     */
     async pause() {
-      const context = await getAudioContext();
+      if (state.destroyed) return;
+      
+      queue.queue.push(pauseAudio);
 
-      if (context.state === "running") {
-        await context.suspend();
+      return queue.execute();
+    },
+    /**
+     * Reset
+     */
+    async reset() {
+      if (state.destroyed) return;
 
-        state.playing = false;
+      if (state.playing) {
+        queue.queue.push(pauseAudio)
       }
+
+      queue.queue.push(
+        disconnectAudio,
+        createBufferSource,
+        connectSources
+      );
+
+      if (state.playing) {
+        queue.queue.push(playAudio)
+      }
+
+      return queue.execute();
     },
-    on: {
-      async setup() {
-        await getGainNode.promise;
-      },
-      async fetch() {
-        await fetchArrayBuffer.promise;
-      },
-      async load() {
-        await load.promise;
-      }
+    /**
+     * Destroy
+     */
+    async destroy() {
+      if (state.destroyed) return;
+
+      unregister();
+
+      queue.queue.push(
+        pauseAudio,
+        disconnectAudio
+      );
+
+      await queue.execute();
+
+      state.destroyed = true;
+
+      // @ts-expect-error
+      audioContext = null;
+      // @ts-expect-error
+      gainNode = null;
+      // @ts-expect-error
+      bufferSource = null;
+      // @ts-expect-error
+      arrayBuffer = null;
+      // @ts-expect-error
+      audioBuffer = null;
     },
-    actions: {
-      /**
-       * 1-st step of initialization. AudioContext is initialized
-       */
-      async setup() {
-        await getAudioContext();
-        await getGainNode();
-        await getBufferSource();
-      },
-      /**
-       * 2-nd step of initialization. Audio fetched
-       */
-      async fetch() {
-        await fetchArrayBuffer();
-      },
-      /**
-       * 3-rd step of initialization. Audio decoded and ready to play
-       */
-      async load() {
-        await load();
-      },
-      async reset() {
-        await reset();
-      }
+    async fetch() {
+      if (state.destroyed) return;
+
+      await fetchArrayBuffer();
     },
     /**
      * Is currently playing
@@ -168,30 +234,7 @@ const createAudio = (options: AudioOptions) => {
     get playing() {
       return state.playing;
     },
-    /**
-     * Volume
-     */
-    get volume() {
-      if (getGainNode.value) {
-        return getGainNode.value.gain.value;
-      }
-
-      return 1;
-    },
-    set volume(value: number) {
-      if (getGainNode.value) {
-        getGainNode.value.gain.value = value;
-
-        return;
-      }
-
-      getGainNode().then((gainNode) => {
-        gainNode.gain.value = value;
-      });
-    }
-  };
-
-  return instance;
+  }
 };
 
 export { createAudio };
