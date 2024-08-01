@@ -2,7 +2,6 @@ import { waitForInteraction } from "./wait_for_interaction";
 import { registerEventListeners } from './browser-events';
 import { createQueue } from './queue';
 import { createMemo } from './memo';
-import { noop } from "./noop";
 
 const fetcherMemo = createMemo<ArrayBuffer>();
 const decoderMemo = createMemo<AudioBuffer>()
@@ -48,22 +47,12 @@ type AudioOptions = {
   extendAudioGraph?: ExtendAudioGraph;
 };
 
-type OnEndedCallback = (this: AudioScheduledSourceNode, e: Event) => void;
-
 const createAudio = (options: AudioOptions) => {
   let audioContext: AudioContext;
   let gainNode: GainNode;
   let bufferSource: AudioBufferSourceNode;
   let arrayBuffer: ArrayBuffer;
   let audioBuffer: AudioBuffer;
-
-  let onEnded: OnEndedCallback = noop;
-
-  const onBufferSourceEnded: OnEndedCallback = function(event) {
-    onEnded.call(this, event);
-
-    bufferSource.onended = null;
-  }
 
   const createAudioContext = () => {
     audioContext = new AudioContext()
@@ -86,8 +75,6 @@ const createAudio = (options: AudioOptions) => {
   const createBufferSource = () => {
     bufferSource = audioContext.createBufferSource();
     bufferSource.loop = options.loop || false;
-
-    bufferSource.onended = onBufferSourceEnded;
   }
 
   const fetchArrayBuffer = fetcherMemo(options.src, () => {
@@ -291,13 +278,6 @@ const createAudio = (options: AudioOptions) => {
       await fetchArrayBuffer();
     },
     /**
-     * Set's callback once, overriding previous one
-     * @param cb Callback function
-     */
-    onEnded(cb: OnEndedCallback) {
-      onEnded = cb;
-    },
-    /**
      * Is currently playing
      */
     get playing() {
@@ -318,5 +298,11 @@ const createAudio = (options: AudioOptions) => {
   }
 };
 
-export { createAudio };
+const prefetchAudio = (src: string) => {
+  const fetcher = fetcherMemo(src, () => fetch(src).then(res => res.arrayBuffer()));
+
+  return fetcher();
+}
+
+export { prefetchAudio, createAudio };
 export type { AudioOptions }

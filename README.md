@@ -42,22 +42,6 @@ audio.fetch().then(() => {
 })
 ```
 
-## События
-
-Есть событие окончания музыки. Срабатывает в случае если параметр `loop` установлен в значение `false`.
-
-```ts
-import { createAudio } from 'simple-web-audio';
-
-const audio = createAudio({
-  src: './path-to-music.weba',
-});
-
-audio.onEnded((event) => {
-  console.log('Конец трека, ', event);
-})
-```
-
 ## Пользовательские эффекты
 
 ```ts
