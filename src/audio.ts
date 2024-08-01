@@ -4,6 +4,17 @@ import { createQueue } from './queue';
 import { cachedPromise } from './cached-promise';
 import { noop } from "./noop";
 
+type ExtendAudioGraphOptions = {
+  context: AudioContext;
+  node: GainNode;
+}
+
+type AudioNodeLike = {
+  connect: ((destinationNode: AudioNode) => void);
+}
+
+type ExtendAudioGraph = (options: ExtendAudioGraphOptions) => AudioNode | AudioNodeLike;
+
 type AudioOptions = {
   /**
    * Source
@@ -28,9 +39,13 @@ type AudioOptions = {
    * @default false
    */
   autoplay?: boolean;
+  /**
+   * Function to extend audio "graph"
+   */
+  extendAudioGraph?: ExtendAudioGraph;
 };
 
-type OnEndedCallback = (this: AudioScheduledSourceNode, ev: Event) => any;
+type OnEndedCallback = (this: AudioScheduledSourceNode, e: Event) => void;
 
 const createAudio = (options: AudioOptions) => {
   let audioContext: AudioContext;
@@ -44,7 +59,6 @@ const createAudio = (options: AudioOptions) => {
   const onBufferSourceEnded: OnEndedCallback = function(event) {
     onEnded.call(this, event);
 
-    // todo: make sure this is not current buffer source
     bufferSource.onended = null;
   }
 
@@ -55,7 +69,15 @@ const createAudio = (options: AudioOptions) => {
   const createGainNode = () => {
     gainNode = audioContext.createGain();
     gainNode.gain.value = options.volume || 1;
-    gainNode.connect(audioContext.destination);
+
+    const extendAudioGraph = options.extendAudioGraph || (() => gainNode);
+
+    const node = extendAudioGraph({
+      context: audioContext,
+      node: gainNode
+    });
+
+    node.connect(audioContext.destination);
   }
 
   const createBufferSource = () => {
