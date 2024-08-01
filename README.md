@@ -90,3 +90,26 @@ const audio = createAudio({
   }
 });
 ```
+
+## Изменение громкости
+
+Изменить громкость можно во время запуска функции createAudio, но также существует возможность изменять громкость во время исполнения.
+
+```ts
+const audio = createAudio({
+  src: './path-to-music.weba',
+  volume: 0.5
+});
+
+try {
+  audio.volume = 0.25;
+} catch (error) {
+  console.log(error)
+}
+
+audio.play().then(() => {
+  audio.volume = 0.25;
+})
+```
+
+Но менять громкость можно только после запуска воспроизведения аудио.

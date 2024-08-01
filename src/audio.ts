@@ -1,8 +1,10 @@
 import { waitForInteraction } from "./wait_for_interaction";
 import { registerEventListeners } from './browser-events';
 import { createQueue } from './queue';
-import { cachedPromise } from './cached-promise';
+import { createMemo } from './memo';
 import { noop } from "./noop";
+
+const fetcherMemo = createMemo<ArrayBuffer>();
 
 type ExtendAudioGraphOptions = {
   context: AudioContext;
@@ -87,9 +89,13 @@ const createAudio = (options: AudioOptions) => {
     bufferSource.onended = onBufferSourceEnded;
   }
 
-  const fetchArrayBuffer = cachedPromise(async () => {
-    arrayBuffer = await fetch(options.src).then(res => res.arrayBuffer());
-  })
+  const fetchArrayBuffer = fetcherMemo(options.src, () => {
+    return fetch(options.src).then(res => res.arrayBuffer());
+  });
+
+  const setArrayBuffer = async () => {
+    arrayBuffer = await fetchArrayBuffer();
+  }
 
   const decodeAudioData = async () => {
     audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
@@ -108,6 +114,7 @@ const createAudio = (options: AudioOptions) => {
     createGainNode,
     createBufferSource,
     fetchArrayBuffer,
+    setArrayBuffer,
     decodeAudioData,
     connectSources,
   ]);
@@ -233,6 +240,8 @@ const createAudio = (options: AudioOptions) => {
      * Stop
      */
     async stop() {
+      if (state.destroyed) return;
+
       queue.queue.push(
         pauseAudio,
         disconnectAudio,
