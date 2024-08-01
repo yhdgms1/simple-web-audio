@@ -196,6 +196,19 @@ const createAudio = (options: AudioOptions) => {
       return queue.execute();
     },
     /**
+     * Stop
+     */
+    async stop() {
+      queue.queue.push(
+        pauseAudio,
+        disconnectAudio,
+        createBufferSource,
+        connectSources
+      );
+
+      return queue.execute();
+    },
+    /**
      * Destroy
      */
     async destroy() {
@@ -234,6 +247,18 @@ const createAudio = (options: AudioOptions) => {
     get playing() {
       return state.playing;
     },
+    get volume() {
+      return gainNode.gain.value;
+    },
+    set volume(value) {
+      gainNode.gain.value = value;
+    },
+    get loop() {
+      return bufferSource.loop;
+    },
+    set loop(value) {
+      bufferSource.loop = value;
+    }
   }
 };
 
