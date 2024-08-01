@@ -1,5 +1,6 @@
-import { promiseOnce } from "./promise_once";
 import { waitForInteraction } from "./wait_for_interaction";
+import { registerEventListeners } from './browser-events';
+import pLimit from 'p-limit';
 
 type AudioOptions = {
   /**
@@ -10,157 +11,157 @@ type AudioOptions = {
    * Loop
    */
   loop: boolean;
+  /**
+   * Volume
+   */
+  volume: number;
 };
 
 const createAudio = (options: AudioOptions) => {
-  let getAudioContext = promiseOnce(async () => {
-    await waitForInteraction();
+  let audioContext: AudioContext;
+  let gainNode: GainNode;
+  let bufferSource: AudioBufferSourceNode;
+  let arrayBuffer: ArrayBuffer;
+  let audioBuffer: AudioBuffer;
 
-    return new AudioContext();
-  });
+  const createAudioContext = () => {
+    audioContext = new AudioContext({
+      sampleRate: 44100
+    })
+  }
 
-  let getGainNode = promiseOnce(async () => {
-    const context = await getAudioContext();
+  const createGainNode = () => {
+    gainNode = audioContext.createGain();
+    gainNode.gain.value = options.volume;
+    gainNode.connect(audioContext.destination);
+  }
 
-    const gainNode = context.createGain();
+  const createBufferSource = () => {
+    bufferSource = audioContext.createBufferSource();
+    bufferSource.loop = options.loop;
+  }
 
-    gainNode.connect(context.destination);
+  const fetchArrayBuffer = async () => {
+    arrayBuffer = await fetch(options.src).then(res => res.arrayBuffer());
+  }
 
-    return gainNode;
-  });
+  const decodeAudioData = async () => {
+    audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+  }
 
-  let getBufferSource = promiseOnce(async () => {
-    const context = await getAudioContext();
-    const source = context.createBufferSource();
+  const connectSources = () => {
+    if (bufferSource.buffer === null) {
+      bufferSource.buffer = audioBuffer;
+      bufferSource.connect(gainNode);
+    }
+  }
 
-    source.loop = options.loop;
+  let queue = [
+    waitForInteraction,
+    createAudioContext,
+    createGainNode,
+    createBufferSource,
+    fetchArrayBuffer,
+    decodeAudioData,
+    connectSources
+  ];
 
-    return source;
-  });
+  const limit = pLimit(1);
 
-  let fetchArrayBuffer = promiseOnce(async () => {
-    const response = await fetch(options.src);
+  const run = async () => {
+    const items = queue.slice();
 
-    return await response.arrayBuffer();
-  });
-
-  let getAudioData = promiseOnce(async () => {
-    const arrayBuffer = await fetchArrayBuffer();
-    const context = await getAudioContext();
-
-    return await context.decodeAudioData(arrayBuffer)
-  })
-
-  let load = promiseOnce(async () => {
-    const audioData = await getAudioData();
-
-    const source = await getBufferSource();
-    const gainNode = await getGainNode();
-
-    source.buffer = audioData;
-    source.connect(gainNode);
-  });
-
-  let reset = async () => {
-    if (state.playing) {
-      return;
+    for await (const item of items) {
+      await item();
     }
 
-    /**
-     * Disconnect
-     */
-    await getBufferSource().then((source) => source.disconnect());
+    queue = queue.filter(item => !items.includes(item));
+  };
 
-    /**
-     * Reset `started` value
-     * That will make `source.start()` call when `play()` will be called
-     */
-    state.started = false;
+  const unregister = registerEventListeners({
+    focus: () => {
+      queue.push(playAudio);
+      limit(run)
+    },
+    blur: () => {
+      queue.push(pauseAudio);
+      limit(run)
+    }
+  });
 
-    /**
-     * Reset functions
-     */
-    getBufferSource = promiseOnce(getBufferSource.fn);
-    load = promiseOnce(load.fn);
-
-    /**
-     * Re-create buffer and connect it
-     */
-    await getBufferSource();
-    await load();
-  }
+  unregister;
 
   const state = {
     started: false,
     playing: false,
   };
 
-  const instance = {
-    async play() {
-      const context = await getAudioContext();
-      const source = await getBufferSource();
+  const playAudio = async () => {
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
 
-      await load();
-
-      if (context.state === "suspended") {
-        await context.resume();
-
-        if (state.started) {
-          state.playing = true;
-        }
-      }
-
-      if (!state.started) {
-        source.start();
-
-        state.started = true;
+      if (state.started) {
         state.playing = true;
       }
+    }
+
+    if (!state.started) {
+      bufferSource.start();
+
+      state.started = true;
+      state.playing = true;
+    }
+  }
+
+  const pauseAudio = async () => {
+    if (audioContext.state === "suspended" && queue.at(-1) === playAudio) {
+      queue.pop();
+    }
+
+    if (audioContext.state === "running") {
+      await audioContext.suspend();
+
+      state.playing = false;
+    }
+  }
+
+  const disconnectAudio = async () => {
+    bufferSource.disconnect();
+
+    /**
+     * Reset `started` value
+     * That will make `source.start()` call when `play()` will be called
+     */
+    state.started = false;
+  }
+
+  const instance = {
+    async play() {
+      queue.push(playAudio);
+      run()
     },
     async pause() {
-      const context = await getAudioContext();
-
-      if (context.state === "running") {
-        await context.suspend();
-
-        state.playing = false;
-      }
+      queue.push(pauseAudio);
+      run()
     },
-    on: {
-      async setup() {
-        await getGainNode.promise;
-      },
-      async fetch() {
-        await fetchArrayBuffer.promise;
-      },
-      async load() {
-        await load.promise;
+    async reset() {
+      const playing = state.playing;
+
+      if (playing) {
+        queue.push(pauseAudio)
       }
-    },
-    actions: {
-      /**
-       * 1-st step of initialization. AudioContext is initialized
-       */
-      async setup() {
-        await getAudioContext();
-        await getGainNode();
-        await getBufferSource();
-      },
-      /**
-       * 2-nd step of initialization. Audio fetched
-       */
-      async fetch() {
-        await fetchArrayBuffer();
-      },
-      /**
-       * 3-rd step of initialization. Audio decoded and ready to play
-       */
-      async load() {
-        await load();
-      },
-      async reset() {
-        await reset();
+
+      queue.push(
+        disconnectAudio,
+        createBufferSource,
+        connectSources
+      );
+
+      if (playing) {
+        queue.push(playAudio)
       }
+
+      limit(run)
     },
     /**
      * Is currently playing
@@ -168,27 +169,7 @@ const createAudio = (options: AudioOptions) => {
     get playing() {
       return state.playing;
     },
-    /**
-     * Volume
-     */
-    get volume() {
-      if (getGainNode.value) {
-        return getGainNode.value.gain.value;
-      }
-
-      return 1;
-    },
-    set volume(value: number) {
-      if (getGainNode.value) {
-        getGainNode.value.gain.value = value;
-
-        return;
-      }
-
-      getGainNode().then((gainNode) => {
-        gainNode.gain.value = value;
-      });
-    }
+    run: () => limit(run),
   };
 
   return instance;
