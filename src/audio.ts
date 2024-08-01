@@ -5,6 +5,7 @@ import { createMemo } from './memo';
 import { noop } from "./noop";
 
 const fetcherMemo = createMemo<ArrayBuffer>();
+const decoderMemo = createMemo<AudioBuffer>()
 
 type ExtendAudioGraphOptions = {
   context: AudioContext;
@@ -97,8 +98,12 @@ const createAudio = (options: AudioOptions) => {
     arrayBuffer = await fetchArrayBuffer();
   }
 
-  const decodeAudioData = async () => {
-    audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+  const decodeAudioData = decoderMemo(options.src, () => {
+    return audioContext.decodeAudioData(arrayBuffer)
+  })
+
+  const setAudioData = async () => {
+    audioBuffer = await decodeAudioData();
   }
 
   const connectSources = () => {
@@ -116,6 +121,7 @@ const createAudio = (options: AudioOptions) => {
     fetchArrayBuffer,
     setArrayBuffer,
     decodeAudioData,
+    setAudioData,
     connectSources,
   ]);
 
