@@ -55,13 +55,18 @@ const createAudio = (options: AudioOptions) => {
   let arrayBuffer: ArrayBuffer;
   let audioBuffer: AudioBuffer;
 
+  /**
+   * Values that pending it's queue to be set
+   */
+  let pendingVolume = options.volume || 1;
+  let pendingLoop = options.loop || false;
+
   const createAudioContext = () => {
     audioContext = new AudioContext()
   }
 
   const createGainNode = () => {
     gainNode = audioContext.createGain();
-    gainNode.gain.value = options.volume || 1;
 
     const extendAudioGraph = options.extendAudioGraph || (() => gainNode);
 
@@ -75,7 +80,6 @@ const createAudio = (options: AudioOptions) => {
 
   const createBufferSource = () => {
     bufferSource = audioContext.createBufferSource();
-    bufferSource.loop = options.loop || false;
   }
 
   const fetchArrayBuffer = fetcherMemo(options.src, async () => {
@@ -110,11 +114,21 @@ const createAudio = (options: AudioOptions) => {
     }
   }
 
+  const setVolume = () => {
+    gainNode.gain.value = pendingVolume;
+  }
+
+  const setLoop = () => {
+    bufferSource.loop = pendingLoop;
+  }
+
   const queue = createQueue([
     waitForInteraction,
     createAudioContext,
     createGainNode,
+    setVolume,
     createBufferSource,
+    setLoop,
     fetchArrayBuffer,
     setArrayBuffer,
     decodeAudioData,
@@ -220,6 +234,7 @@ const createAudio = (options: AudioOptions) => {
       queue.queue.push(
         disconnectAudio,
         createBufferSource,
+        setLoop,
         connectSources
       );
 
@@ -236,6 +251,7 @@ const createAudio = (options: AudioOptions) => {
         pauseAudio,
         disconnectAudio,
         createBufferSource,
+        setLoop,
         connectSources
       );
 
@@ -278,16 +294,24 @@ const createAudio = (options: AudioOptions) => {
       return state.destroyed;
     },
     get volume() {
-      return gainNode.gain.value;
+      return pendingVolume;
     },
     set volume(value) {
-      gainNode.gain.value = value;
+      if (state.destroyed) return;
+
+      pendingVolume = value;
+      queue.queue.push(setVolume);
+      queue.execute()
     },
     get loop() {
-      return bufferSource.loop;
+      return pendingLoop;
     },
     set loop(value) {
-      bufferSource.loop = value;
+      if (state.destroyed) return;
+     
+      pendingLoop = value;
+      queue.queue.push(setLoop);
+      queue.execute()
     }
   } satisfies AudioInstance;
 
