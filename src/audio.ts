@@ -246,8 +246,6 @@ const createAudio = (options: AudioOptions) => {
 
       unregister();
 
-      console.log(queue.queue)
-
       queue.queue = [
         pauseAudio,
         disconnectAudio
