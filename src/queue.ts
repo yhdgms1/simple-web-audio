@@ -3,13 +3,15 @@ import pLimit from 'p-limit';
 type Thenable<T> = T | Promise<T>;
 type Queue = (() => Thenable<void>)[]
 
-const createQueue = (queue: Queue) => {
+const createQueue = (queue: Queue, stopped = false) => {
   const limit = pLimit(1);
 
   const run = async () => {
     const items = queue.slice();
 
-    for await (const item of items) {
+    loop: for await (const item of items) {
+      if (stopped) break loop;
+
       await item();
     }
 
@@ -22,6 +24,9 @@ const createQueue = (queue: Queue) => {
     },
     set queue(value) {
       queue = value;
+    },
+    stop() {
+      stopped = true;
     },
     execute: () => {
       return limit(run);

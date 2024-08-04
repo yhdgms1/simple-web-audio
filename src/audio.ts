@@ -1,10 +1,11 @@
+import type { AudioInstance } from "./types";
 import { waitForInteraction } from "./wait_for_interaction";
 import { registerEventListeners } from './browser-events';
 import { createQueue } from './queue';
 import { createMemo } from './memo';
 
-const fetcherMemo = createMemo<ArrayBuffer>();
-const decoderMemo = createMemo<AudioBuffer>()
+const fetcherMemo = createMemo<ArrayBuffer | void>();
+const decoderMemo = createMemo<AudioBuffer | void>();
 
 type ExtendAudioGraphOptions = {
   context: AudioContext;
@@ -77,24 +78,33 @@ const createAudio = (options: AudioOptions) => {
     bufferSource.loop = options.loop || false;
   }
 
-  const fetchArrayBuffer = fetcherMemo(options.src, () => {
-    return fetch(options.src).then(res => res.arrayBuffer());
+  const fetchArrayBuffer = fetcherMemo(options.src, async () => {
+    try {
+      return await fetch(options.src).then(res => res.arrayBuffer());
+    } catch {
+      /**
+       * Firstly prevent next queue items from running because they depend on previous items
+       * Then destroy audio because there is no reason to try run it over and over again
+       */
+      queue.stop();
+      instance.destroy();
+    }
   });
 
   const setArrayBuffer = async () => {
-    arrayBuffer = await fetchArrayBuffer();
+    arrayBuffer = (await fetchArrayBuffer())!;
   }
 
-  const decodeAudioData = decoderMemo(options.src, () => {
-    return audioContext.decodeAudioData(arrayBuffer)
+  const decodeAudioData = decoderMemo(options.src, async () => {
+    return audioContext.decodeAudioData(arrayBuffer);
   })
 
   const setAudioData = async () => {
-    audioBuffer = await decodeAudioData();
+    audioBuffer = (await decodeAudioData())!;
   }
 
   const connectSources = () => {
-    if (bufferSource.buffer === null) {
+    if (bufferSource && bufferSource.buffer === null) {
       bufferSource.buffer = audioBuffer;
       bufferSource.connect(gainNode);
     }
@@ -119,7 +129,7 @@ const createAudio = (options: AudioOptions) => {
 
   const unregister = registerEventListeners({
     focus: () => {
-      if (!options.pauseOnBlur || !resume) return;
+      if (!options.pauseOnBlur || !resume || state.destroyed) return;
 
       resume = false;
 
@@ -127,7 +137,7 @@ const createAudio = (options: AudioOptions) => {
       queue.execute()
     },
     blur: () => {
-      if (!options.pauseOnBlur || !state.playing) return;
+      if (!options.pauseOnBlur || !state.playing || state.destroyed) return;
 
       resume = true;
 
@@ -143,6 +153,8 @@ const createAudio = (options: AudioOptions) => {
   };
 
   const playAudio = async () => {
+    if (state.destroyed) return;
+
     if (audioContext.state === "suspended") {
       await audioContext.resume();
 
@@ -160,6 +172,8 @@ const createAudio = (options: AudioOptions) => {
   }
 
   const pauseAudio = async () => {
+    if (state.destroyed) return;
+    
     if (audioContext.state === "suspended" && queue.queue.at(-1) === playAudio) {
       queue.queue.pop();
     }
@@ -172,7 +186,7 @@ const createAudio = (options: AudioOptions) => {
   }
 
   const disconnectAudio = async () => {
-    bufferSource.disconnect();
+    bufferSource && bufferSource.disconnect();
 
     /**
      * Reset `started` value
@@ -181,15 +195,7 @@ const createAudio = (options: AudioOptions) => {
     state.started = false;
   }
 
-  if (options.autoplay) {
-    queue.queue.push(playAudio)
-    queue.execute()
-  }
-
-  return {
-    /**
-     * Play
-     */
+  const instance = {
     async play() {
       if (state.destroyed) return;
       
@@ -197,9 +203,6 @@ const createAudio = (options: AudioOptions) => {
 
       return queue.execute();
     },
-    /**
-     * Pause
-     */
     async pause() {
       if (state.destroyed) return;
       
@@ -207,9 +210,6 @@ const createAudio = (options: AudioOptions) => {
 
       return queue.execute();
     },
-    /**
-     * Reset
-     */
     async reset() {
       if (state.destroyed) return;
 
@@ -229,9 +229,6 @@ const createAudio = (options: AudioOptions) => {
 
       return queue.execute();
     },
-    /**
-     * Stop
-     */
     async stop() {
       if (state.destroyed) return;
 
@@ -244,18 +241,17 @@ const createAudio = (options: AudioOptions) => {
 
       return queue.execute();
     },
-    /**
-     * Destroy
-     */
     async destroy() {
       if (state.destroyed) return;
 
       unregister();
 
-      queue.queue.push(
+      console.log(queue.queue)
+
+      queue.queue = [
         pauseAudio,
         disconnectAudio
-      );
+      ];
 
       await queue.execute();
 
@@ -277,11 +273,11 @@ const createAudio = (options: AudioOptions) => {
 
       await fetchArrayBuffer();
     },
-    /**
-     * Is currently playing
-     */
     get playing() {
       return state.playing;
+    },
+    get destroyed() {
+      return state.destroyed;
     },
     get volume() {
       return gainNode.gain.value;
@@ -295,7 +291,14 @@ const createAudio = (options: AudioOptions) => {
     set loop(value) {
       bufferSource.loop = value;
     }
+  } satisfies AudioInstance;
+
+  if (options.autoplay) {
+    queue.queue.push(playAudio)
+    queue.execute()
   }
+
+  return instance;
 };
 
 const prefetchAudio = (src: string) => {
