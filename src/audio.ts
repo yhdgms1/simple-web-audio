@@ -65,12 +65,14 @@ const createAudio = (options: AudioOptions) => {
     audioContext = new AudioContext()
   }
 
+  const getGainNode = () => {
+    return gainNode;
+  }
+
   const createGainNode = () => {
     gainNode = audioContext.createGain();
 
-    const extendAudioGraph = options.extendAudioGraph || (() => gainNode);
-
-    const node = extendAudioGraph({
+    const node = (options.extendAudioGraph || getGainNode)({
       context: audioContext,
       node: gainNode
     });
