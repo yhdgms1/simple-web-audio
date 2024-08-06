@@ -94,15 +94,5 @@ const audio = createAudio({
   volume: 0.5
 });
 
-try {
-  audio.volume = 0.25;
-} catch (error) {
-  console.log(error)
-}
-
-audio.play().then(() => {
-  audio.volume = 0.25;
-})
+audio.volume = 0.25;
 ```
-
-Но менять громкость можно только после запуска воспроизведения аудио.

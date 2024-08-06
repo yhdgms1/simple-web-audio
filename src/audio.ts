@@ -1,10 +1,11 @@
+import type { AudioInstance } from "./types";
 import { waitForInteraction } from "./wait_for_interaction";
 import { registerEventListeners } from './browser-events';
 import { createQueue } from './queue';
 import { createMemo } from './memo';
 
 const fetcherMemo = createMemo<ArrayBuffer>();
-const decoderMemo = createMemo<AudioBuffer>()
+const decoderMemo = createMemo<AudioBuffer>();
 
 type ExtendAudioGraphOptions = {
   context: AudioContext;
@@ -54,17 +55,24 @@ const createAudio = (options: AudioOptions) => {
   let arrayBuffer: ArrayBuffer;
   let audioBuffer: AudioBuffer;
 
+  /**
+   * Values that pending it's queue to be set
+   */
+  let pendingVolume = options.volume || 1;
+  let pendingLoop = options.loop || false;
+
   const createAudioContext = () => {
     audioContext = new AudioContext()
   }
 
+  const getGainNode = () => {
+    return gainNode;
+  }
+
   const createGainNode = () => {
     gainNode = audioContext.createGain();
-    gainNode.gain.value = options.volume || 1;
 
-    const extendAudioGraph = options.extendAudioGraph || (() => gainNode);
-
-    const node = extendAudioGraph({
+    const node = (options.extendAudioGraph || getGainNode)({
       context: audioContext,
       node: gainNode
     });
@@ -74,19 +82,37 @@ const createAudio = (options: AudioOptions) => {
 
   const createBufferSource = () => {
     bufferSource = audioContext.createBufferSource();
-    bufferSource.loop = options.loop || false;
   }
 
-  const fetchArrayBuffer = fetcherMemo(options.src, () => {
-    return fetch(options.src).then(res => res.arrayBuffer());
+  const interruptQueueThenDestroy = (cause: Error | unknown) => {
+    /**
+     * Firstly prevent next queue items from running because they depend on previous items
+     * Then destroy audio because there is no reason to try run it over and over again
+     */
+    queue.stop();
+    instance.destroy();
+
+    return new Error('', { cause });
+  }
+
+  const fetchArrayBuffer = fetcherMemo(options.src, async () => {
+    try {
+      return await fetch(options.src).then(response => response.arrayBuffer());
+    } catch (error) {
+      throw interruptQueueThenDestroy(error);
+    }
   });
 
   const setArrayBuffer = async () => {
     arrayBuffer = await fetchArrayBuffer();
   }
 
-  const decodeAudioData = decoderMemo(options.src, () => {
-    return audioContext.decodeAudioData(arrayBuffer)
+  const decodeAudioData = decoderMemo(options.src, async () => {
+    try {
+      return await audioContext.decodeAudioData(arrayBuffer);
+    } catch (error) {
+      throw interruptQueueThenDestroy(error);
+    }
   })
 
   const setAudioData = async () => {
@@ -94,17 +120,27 @@ const createAudio = (options: AudioOptions) => {
   }
 
   const connectSources = () => {
-    if (bufferSource.buffer === null) {
+    if (bufferSource && bufferSource.buffer === null) {
       bufferSource.buffer = audioBuffer;
       bufferSource.connect(gainNode);
     }
+  }
+
+  const setVolume = () => {
+    gainNode.gain.value = pendingVolume;
+  }
+
+  const setLoop = () => {
+    bufferSource.loop = pendingLoop;
   }
 
   const queue = createQueue([
     waitForInteraction,
     createAudioContext,
     createGainNode,
+    setVolume,
     createBufferSource,
+    setLoop,
     fetchArrayBuffer,
     setArrayBuffer,
     decodeAudioData,
@@ -119,7 +155,7 @@ const createAudio = (options: AudioOptions) => {
 
   const unregister = registerEventListeners({
     focus: () => {
-      if (!options.pauseOnBlur || !resume) return;
+      if (!options.pauseOnBlur || !resume || state.destroyed) return;
 
       resume = false;
 
@@ -127,7 +163,7 @@ const createAudio = (options: AudioOptions) => {
       queue.execute()
     },
     blur: () => {
-      if (!options.pauseOnBlur || !state.playing) return;
+      if (!options.pauseOnBlur || !state.playing || state.destroyed) return;
 
       resume = true;
 
@@ -143,6 +179,8 @@ const createAudio = (options: AudioOptions) => {
   };
 
   const playAudio = async () => {
+    if (state.destroyed) return;
+
     if (audioContext.state === "suspended") {
       await audioContext.resume();
 
@@ -160,6 +198,8 @@ const createAudio = (options: AudioOptions) => {
   }
 
   const pauseAudio = async () => {
+    if (state.destroyed) return;
+    
     if (audioContext.state === "suspended" && queue.queue.at(-1) === playAudio) {
       queue.queue.pop();
     }
@@ -172,7 +212,7 @@ const createAudio = (options: AudioOptions) => {
   }
 
   const disconnectAudio = async () => {
-    bufferSource.disconnect();
+    bufferSource && bufferSource.disconnect();
 
     /**
      * Reset `started` value
@@ -181,15 +221,7 @@ const createAudio = (options: AudioOptions) => {
     state.started = false;
   }
 
-  if (options.autoplay) {
-    queue.queue.push(playAudio)
-    queue.execute()
-  }
-
-  return {
-    /**
-     * Play
-     */
+  const instance = {
     async play() {
       if (state.destroyed) return;
       
@@ -197,9 +229,6 @@ const createAudio = (options: AudioOptions) => {
 
       return queue.execute();
     },
-    /**
-     * Pause
-     */
     async pause() {
       if (state.destroyed) return;
       
@@ -207,9 +236,6 @@ const createAudio = (options: AudioOptions) => {
 
       return queue.execute();
     },
-    /**
-     * Reset
-     */
     async reset() {
       if (state.destroyed) return;
 
@@ -220,6 +246,7 @@ const createAudio = (options: AudioOptions) => {
       queue.queue.push(
         disconnectAudio,
         createBufferSource,
+        setLoop,
         connectSources
       );
 
@@ -229,9 +256,6 @@ const createAudio = (options: AudioOptions) => {
 
       return queue.execute();
     },
-    /**
-     * Stop
-     */
     async stop() {
       if (state.destroyed) return;
 
@@ -239,23 +263,21 @@ const createAudio = (options: AudioOptions) => {
         pauseAudio,
         disconnectAudio,
         createBufferSource,
+        setLoop,
         connectSources
       );
 
       return queue.execute();
     },
-    /**
-     * Destroy
-     */
     async destroy() {
       if (state.destroyed) return;
 
       unregister();
 
-      queue.queue.push(
+      queue.queue = [
         pauseAudio,
         disconnectAudio
-      );
+      ];
 
       await queue.execute();
 
@@ -277,25 +299,40 @@ const createAudio = (options: AudioOptions) => {
 
       await fetchArrayBuffer();
     },
-    /**
-     * Is currently playing
-     */
     get playing() {
       return state.playing;
     },
+    get destroyed() {
+      return state.destroyed;
+    },
     get volume() {
-      return gainNode.gain.value;
+      return pendingVolume;
     },
     set volume(value) {
-      gainNode.gain.value = value;
+      if (state.destroyed) return;
+
+      pendingVolume = value;
+      queue.queue.push(setVolume);
+      queue.execute()
     },
     get loop() {
-      return bufferSource.loop;
+      return pendingLoop;
     },
     set loop(value) {
-      bufferSource.loop = value;
+      if (state.destroyed) return;
+     
+      pendingLoop = value;
+      queue.queue.push(setLoop);
+      queue.execute()
     }
+  } satisfies AudioInstance;
+
+  if (options.autoplay) {
+    queue.queue.push(playAudio)
+    queue.execute()
   }
+
+  return instance;
 };
 
 const prefetchAudio = (src: string) => {
