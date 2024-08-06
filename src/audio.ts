@@ -5,7 +5,7 @@ import { createQueue } from './queue';
 import { createMemo } from './memo';
 
 const fetcherMemo = createMemo<ArrayBuffer | void>();
-const decoderMemo = createMemo<AudioBuffer | void>();
+const decoderMemo = createMemo<AudioBuffer>();
 
 type ExtendAudioGraphOptions = {
   context: AudioContext;
@@ -84,7 +84,7 @@ const createAudio = (options: AudioOptions) => {
 
   const fetchArrayBuffer = fetcherMemo(options.src, async () => {
     try {
-      return await fetch(options.src).then(res => res.arrayBuffer());
+      return fetch(options.src).then(res => res.arrayBuffer());
     } catch {
       /**
        * Firstly prevent next queue items from running because they depend on previous items
@@ -96,7 +96,8 @@ const createAudio = (options: AudioOptions) => {
   });
 
   const setArrayBuffer = async () => {
-    arrayBuffer = (await fetchArrayBuffer())!;
+    // @ts-expect-error It will never be undefined, because when fetch errors, queue interrupts
+    arrayBuffer = await fetchArrayBuffer();
   }
 
   const decodeAudioData = decoderMemo(options.src, async () => {
@@ -104,7 +105,7 @@ const createAudio = (options: AudioOptions) => {
   })
 
   const setAudioData = async () => {
-    audioBuffer = (await decodeAudioData())!;
+    audioBuffer = await decodeAudioData();
   }
 
   const connectSources = () => {

@@ -9,13 +9,14 @@ const createQueue = (queue: Queue, stopped = false) => {
   const run = async () => {
     const items = queue.slice();
 
-    loop: for await (const item of items) {
-      if (stopped) break loop;
+    for await (const item of items) {
+      if (stopped) break;
 
       await item();
     }
 
     queue = queue.filter(item => !items.includes(item));
+    stopped = false;
   };
 
   return {
