@@ -12,7 +12,17 @@ const createQueue = (queue: Queue, stopped = false) => {
     for await (const item of items) {
       if (stopped) break;
 
-      await item();
+      try {
+        await item();
+      } catch (error) {
+        console.error(error);
+        
+        /**
+         * In case that exception is handled then stopped will be set manually in catch block
+         * But in other cases stop it here
+         */
+        stopped = true;
+      }
     }
 
     queue = queue.filter(item => !items.includes(item));

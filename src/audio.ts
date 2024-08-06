@@ -4,7 +4,7 @@ import { registerEventListeners } from './browser-events';
 import { createQueue } from './queue';
 import { createMemo } from './memo';
 
-const fetcherMemo = createMemo<ArrayBuffer | void>();
+const fetcherMemo = createMemo<ArrayBuffer>();
 const decoderMemo = createMemo<AudioBuffer>();
 
 type ExtendAudioGraphOptions = {
@@ -84,26 +84,35 @@ const createAudio = (options: AudioOptions) => {
     bufferSource = audioContext.createBufferSource();
   }
 
+  const interruptQueueThenDestroy = (cause: Error | unknown) => {
+    /**
+     * Firstly prevent next queue items from running because they depend on previous items
+     * Then destroy audio because there is no reason to try run it over and over again
+     */
+    queue.stop();
+    instance.destroy();
+
+    return new Error('', { cause });
+  }
+
   const fetchArrayBuffer = fetcherMemo(options.src, async () => {
     try {
-      return fetch(options.src).then(res => res.arrayBuffer());
-    } catch {
-      /**
-       * Firstly prevent next queue items from running because they depend on previous items
-       * Then destroy audio because there is no reason to try run it over and over again
-       */
-      queue.stop();
-      instance.destroy();
+      return await fetch(options.src).then(response => response.arrayBuffer());
+    } catch (error) {
+      throw interruptQueueThenDestroy(error);
     }
   });
 
   const setArrayBuffer = async () => {
-    // @ts-expect-error It will never be undefined, because when fetch errors, queue interrupts
     arrayBuffer = await fetchArrayBuffer();
   }
 
   const decodeAudioData = decoderMemo(options.src, async () => {
-    return audioContext.decodeAudioData(arrayBuffer);
+    try {
+      return await audioContext.decodeAudioData(arrayBuffer);
+    } catch (error) {
+      throw interruptQueueThenDestroy(error);
+    }
   })
 
   const setAudioData = async () => {
