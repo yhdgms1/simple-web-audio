@@ -7,6 +7,10 @@ import { createMemo } from './memo';
 const fetcherMemo = createMemo<ArrayBuffer>();
 const decoderMemo = createMemo<AudioBuffer>();
 
+const onEndedOptions: AddEventListenerOptions = {
+  once: true,
+};
+
 type ExtendAudioGraphOptions = {
   context: AudioContext;
   node: GainNode;
@@ -298,6 +302,11 @@ const createAudio = (options: AudioOptions) => {
       if (state.destroyed) return;
 
       await fetchArrayBuffer();
+    },
+    onEnded: (callback) => {
+      if (state.destroyed || !bufferSource) return;
+      
+      bufferSource.addEventListener('ended', callback, onEndedOptions);
     },
     get playing() {
       return state.playing;

@@ -24,6 +24,11 @@ type AudioInstance = {
    */
   fetch(): Promise<void>;
   /**
+   * Registers callback to bufferSource.
+   * Once option is used for registering callback.
+   */
+  onEnded: (cb: () => void) => void;
+  /**
    * Is currently playing
    */
   readonly playing: boolean;
