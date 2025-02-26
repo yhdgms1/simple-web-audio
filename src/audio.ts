@@ -1,6 +1,5 @@
 import type { AudioInstance } from "./types";
 import { waitForInteraction } from "./wait_for_interaction";
-import { registerEventListeners } from './browser-events';
 import { createQueue } from './queue';
 import { createMemo } from './memo';
 
@@ -37,11 +36,6 @@ type AudioOptions = {
    * @default 1
    */
   volume?: number;
-  /**
-   * Will pause playing on blur event, play on focus.
-   * @default false
-   */
-  pauseOnBlur?: boolean;
   /**
    * @default false
    */
@@ -152,30 +146,6 @@ const createAudio = (options: AudioOptions) => {
     connectSources,
   ]);
 
-  /**
-   * Will resume when focus or not
-   */
-  let resume = false;
-
-  const unregister = registerEventListeners({
-    focus: () => {
-      if (!options.pauseOnBlur || !resume || state.destroyed) return;
-
-      resume = false;
-
-      queue.queue.push(playAudio);
-      queue.execute()
-    },
-    blur: () => {
-      if (!options.pauseOnBlur || !state.playing || state.destroyed) return;
-
-      resume = true;
-
-      queue.queue.push(pauseAudio);
-      queue.execute()
-    }
-  });
-
   const state = {
     started: false,
     playing: false,
@@ -275,8 +245,6 @@ const createAudio = (options: AudioOptions) => {
     },
     async destroy() {
       if (state.destroyed) return;
-
-      unregister();
 
       queue.queue = [
         pauseAudio,

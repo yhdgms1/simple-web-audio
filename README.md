@@ -10,8 +10,7 @@ import { createAudio } from 'simple-web-audio';
 const audio = createAudio({
   src: './path-to-music.ogg',
   loop: true,
-  volume: 0.25,
-  pauseOnBlur: true
+  volume: 0.25
 });
 
 /**
